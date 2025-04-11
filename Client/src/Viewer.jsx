@@ -8,7 +8,7 @@ const viewerId = uuidv4();
 
 const Viewer = () => {
   const videoRef = useRef();
-  const socketRef = useRef(new WebSocket("ws://192.168.1.89:8880"));
+  const socketRef = useRef(new WebSocket("wss://videostreaming-zkt4.onrender.com"));
   const peerRef = useRef(null);
   const { streamId } = useParams();
   const [chatMessages, setChatMessages] = useState([]);
