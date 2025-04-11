@@ -14,7 +14,6 @@ wss.on("connection", (ws) => {
       if (type === "register") {
         userId = payload.userId;
         clients.set(userId, { ws, role: payload.role, muted: false });
-        console.log(`User ${userId} registered as ${payload.role}`);
         return;
       }
 
@@ -40,7 +39,6 @@ wss.on("connection", (ws) => {
         const target = clients.get(payload.userId);
         if (target) {
           target.muted = true; // Fixed: was setting to false
-          console.log(`User ${payload.userId} muted`);
         }
         return;
       }
@@ -49,7 +47,6 @@ wss.on("connection", (ws) => {
         const target = clients.get(payload.userId);
         if (target) {
           target.muted = false;
-          console.log(`User ${payload.userId} unmuted`);
         }
         return;
       }
@@ -61,11 +58,8 @@ wss.on("connection", (ws) => {
   ws.on("close", () => {
     if (userId !== null) {
       clients.delete(userId);
-      console.log(`User ${userId} disconnected`);
     }
   });
 
   ws.on("error", (err) => console.error("WebSocket error:", err));
 });
-
-console.log("WebSocket server running on ws://192.168.1.89:8880");

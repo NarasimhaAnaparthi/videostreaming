@@ -49,17 +49,13 @@ const Viewer = () => {
               payload: { to: streamId, from: viewerId, signal },
             })
           );
-          console.log("Sending signal:", signal);
         } else {
           console.error("WebSocket not open, cannot send signal");
         }
       });
 
       peerRef.current.on("stream", (stream) => {
-        console.log("Stream received:", stream);
-        console.log(videoRef.current,"videoRef.current")
         if (videoRef.current) {
-          console.log("Stream tracks:", stream.getTracks());
           videoRef.current.srcObject = stream;
           setStreamActive(true);
         } else {
@@ -72,7 +68,6 @@ const Viewer = () => {
       socket.onmessage = ({ data }) => {
         const msg = JSON.parse(data);
         if (msg.type === "signal" && msg.payload.to === viewerId) {
-          console.log("Received signal:", msg.payload.signal);
           peerRef.current.signal(msg.payload.signal);
         }
         if (msg.type === "chat") {
