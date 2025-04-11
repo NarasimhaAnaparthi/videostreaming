@@ -137,7 +137,6 @@ const Viewer = () => {
           ref={videoRef}
           autoPlay
           playsInline
-          muted={true}
           style={{
             width: "100%",
             maxHeight: "60vh",
