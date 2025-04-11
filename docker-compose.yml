@@ -1,0 +1,21 @@
+version: "3.8"
+services:
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    ports:
+      - "3000:80"  # Map host port 3000 to container port 80
+    environment:
+      - NODE_ENV=production
+    depends_on:
+      - server
+
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    ports:
+      - "8880:8880"  # WebSocket server port
+    environment:
+      - NODE_ENV=production
