@@ -24,7 +24,7 @@ const Host = () => {
   const connectWebSocket = () => {
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN)
       return;
-    socketRef.current = new WebSocket("ws://192.168.1.89:8880");
+    socketRef.current = new WebSocket("wss://videostreaming-zkt4.onrender.com");
     const socket = socketRef.current;
 
     socket.onopen = () => {
