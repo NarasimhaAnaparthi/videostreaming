@@ -41,7 +41,6 @@ const Host = () => {
     socket.onmessage = ({ data }) => {
       const msg = JSON.parse(data);
       console.log("signl");
-      console.log("Received signal from:", data);
       if (msg.type === "signal") {
         const fromId = msg.payload.from;
         if (!peersRef.current[fromId]) {
@@ -68,7 +67,6 @@ const Host = () => {
           });
           peer.on("error", (err) => console.error("Peer error:", err));
           peer.on("close", () => {
-            console.log(`Peer ${fromId} closed`);
             delete peersRef.current[fromId];
             setPeers((prev) => {
               const newPeers = { ...prev };
@@ -83,7 +81,6 @@ const Host = () => {
           peersRef.current[fromId].signal(msg.payload.signal);
       }
       if (msg.type === "chat") {
-        console.log("Chat message:", msg.payload);
         setChatMessages((prev) => [...prev, msg.payload]);
       }
     };
@@ -93,7 +90,6 @@ const Host = () => {
       setSocketStatus("error");
     };
     socket.onclose = (event) => {
-      console.log("WebSocket closed:", event.code, event.reason);
       setSocketStatus("disconnected");
       setTimeout(connectWebSocket, 1000);
     };
