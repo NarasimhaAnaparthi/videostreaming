@@ -21,6 +21,7 @@ const Viewer = () => {
   const [connectionStatus, setConnectionStatus] = useState("disconnected");
   const [autoplayFailed, setAutoplayFailed] = useState(false);
   const [connectedPeers, setConnectedPeers] = useState([]);
+
   const iceServers = [
     { urls: "stun:stun.l.google.com:19302" },
     {
@@ -35,34 +36,20 @@ const Viewer = () => {
     while (signalQueueRef.current.length > 0) {
       const signalData = signalQueueRef.current.shift();
       socketRef.current.send(JSON.stringify(signalData));
-      console.log("Sent queued signal:", signalData);
     }
   };
 
   const connectWebSocket = () => {
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-      console.log("WebSocket already open for viewer:", viewerId);
       setConnectionStatus("connected");
       sendQueuedSignals();
       return;
     }
-
-    const wsUrl =
-      "wss://videostreaming-zkt4.onrender.com" || "ws://192.168.1.36:8880";
-    console.log(`Attempting to connect to WebSocket: ${wsUrl}`);
-
-    try {
-      socketRef.current = new WebSocket(wsUrl);
-    } catch (err) {
-      console.error("WebSocket initialization error:", err);
-      setConnectionStatus("error");
-      return;
-    }
-
+    const wsUrl = process.env.REACT_APP_WS_URL || "ws://localhost:8880";
+    socketRef.current = new WebSocket(wsUrl);
     const socket = socketRef.current;
 
     socket.onopen = () => {
-      console.log("Viewer WebSocket connected, viewerId:", viewerId);
       setConnectionStatus("connected");
       socket.send(
         JSON.stringify({
@@ -76,29 +63,22 @@ const Viewer = () => {
     socket.onmessage = ({ data }) => {
       try {
         const msg = JSON.parse(data);
-        console.log("Viewer received:", msg);
         if (msg.type === "signal" && msg.payload.to === viewerId) {
           const fromId = msg.payload.from;
           if (fromId === streamId && peerRef.current) {
             peerRef.current.signal(msg.payload.signal);
-            console.log("Viewer processed signal from Host");
           } else if (qaPeersRef.current[fromId]) {
             qaPeersRef.current[fromId].signal(msg.payload.signal);
-            console.log(`Viewer processed signal from Q&A peer ${fromId}`);
           }
         } else if (msg.type === "approve" && msg.payload.to === viewerId) {
-          console.log("Viewer approved for Q&A");
           setQaStatus("approved");
           startViewerStream();
         } else if (msg.type === "deny" && msg.payload.to === viewerId) {
-          console.log("Viewer Q&A denied");
           setQaStatus("idle");
           alert("Request Denied");
         } else if (msg.type === "chat") {
-          console.log("Viewer received chat:", msg.payload);
           setChatMessages((prev) => [...prev, msg.payload]);
         } else if (msg.type === "qa_stream" && msg.payload.from !== viewerId) {
-          console.log(`Starting Q&A stream for ${msg.payload.from}`);
           startQaPeer(msg.payload.from);
           setConnectedPeers((prev) => [
             ...new Set([...prev, msg.payload.from]),
@@ -111,31 +91,19 @@ const Viewer = () => {
       }
     };
 
-    socket.onerror = (err) => {
-      console.error("Viewer WebSocket error:", err);
-      setConnectionStatus("error");
-    };
+    socket.onerror = () => setConnectionStatus("error");
 
     let reconnectAttempts = 0;
     const maxReconnectAttempts = 5;
     const baseReconnectDelay = 2000;
 
     socket.onclose = (event) => {
-      console.log(
-        `Viewer WebSocket closed: code=${event.code}, reason=${event.reason}`
-      );
       setConnectionStatus("disconnected");
       if (reconnectAttempts < maxReconnectAttempts) {
         const delay = baseReconnectDelay * Math.pow(2, reconnectAttempts);
-        console.log(
-          `Reconnecting (${
-            reconnectAttempts + 1
-          }/${maxReconnectAttempts}) in ${delay}ms...`
-        );
         setTimeout(connectWebSocket, delay);
         reconnectAttempts++;
       } else {
-        console.error("Max reconnect attempts reached for viewer:", viewerId);
         setConnectionStatus("failed");
       }
     };
@@ -156,20 +124,12 @@ const Viewer = () => {
       };
       if (socketRef.current?.readyState === WebSocket.OPEN) {
         socketRef.current.send(JSON.stringify(signalData));
-        console.log(`Viewer sent signal to Q&A peer ${qaUserId}:`, signal);
       } else {
-        console.error(
-          `Queuing signal to Q&A peer ${qaUserId}: WebSocket not open`
-        );
         signalQueueRef.current.push(signalData);
       }
     });
 
     peer.on("stream", (stream) => {
-      console.log(
-        `Viewer received Q&A stream from ${qaUserId}:`,
-        stream.getTracks()
-      );
       setQaPeers((prev) => ({
         ...prev,
         [qaUserId]: { peer, stream },
@@ -181,7 +141,6 @@ const Viewer = () => {
     );
 
     peer.on("close", () => {
-      console.log(`Q&A peer ${qaUserId} closed`);
       delete qaPeersRef.current[qaUserId];
       setQaPeers((prev) => {
         const newPeers = { ...prev };
@@ -204,7 +163,6 @@ const Viewer = () => {
         video: true,
         audio: true,
       });
-      console.log("Viewer stream tracks:", localStream.getTracks());
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = localStream;
         localVideoRef.current
@@ -215,7 +173,6 @@ const Viewer = () => {
       Object.values(qaPeersRef.current).forEach((peer) => {
         peer.addStream(localStream);
       });
-      console.log("Viewer stream added to peers");
     } catch (err) {
       console.error("Viewer stream error:", err);
       setQaStatus("idle");
@@ -229,7 +186,6 @@ const Viewer = () => {
         .then(() => {
           setAutoplayFailed(false);
           setStreamActive(true);
-          console.log("Stream started manually");
         })
         .catch((err) => {
           console.error("Manual play error:", err);
@@ -245,7 +201,6 @@ const Viewer = () => {
           if (socketRef.current?.readyState === WebSocket.OPEN) {
             resolve();
           } else {
-            console.log("Waiting for WebSocket to connect...");
             socketRef.current?.addEventListener("open", resolve, {
               once: true,
             });
@@ -268,51 +223,33 @@ const Viewer = () => {
         };
         if (socketRef.current?.readyState === WebSocket.OPEN) {
           socketRef.current.send(JSON.stringify(signalData));
-          console.log("Viewer sent signal to Host:", signal);
         } else {
-          console.error("Queuing signal to Host: WebSocket not open");
           signalQueueRef.current.push(signalData);
         }
       });
 
       peerRef.current.on("stream", (stream) => {
-        console.log("Viewer received Host stream:", stream.getTracks());
-        const assignStream = () => {
-          if (videoRef.current) {
-            videoRef.current.srcObject = stream;
-            videoRef.current
-              .play()
-              .then(() => {
-                setStreamActive(true);
-                setAutoplayFailed(false);
-              })
-              .catch((err) => {
-                console.error("Video play error:", err);
-                setAutoplayFailed(true);
-                setTimeout(assignStream, 100);
-              });
-          } else {
-            console.warn("Video ref not ready, retrying...");
-            setTimeout(assignStream, 100);
-          }
-        };
-        assignStream();
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current
+            .play()
+            .then(() => {
+              setStreamActive(true);
+              setAutoplayFailed(false);
+            })
+            .catch((err) => {
+              console.error("Video play error:", err);
+              setAutoplayFailed(true);
+            });
+        }
       });
 
       peerRef.current.on("error", (err) => console.error("Peer error:", err));
-
-      peerRef.current.on("iceconnectionstatechange", () => {
-        console.log("Viewer ICE state:", peerRef.current.iceConnectionState);
-      });
-      peerRef.current.on("signalingstatechange", () => {
-        console.log("Viewer signaling state:", peerRef.current.signalingState);
-      });
     };
 
     setupViewer();
 
     return () => {
-      console.log("Cleaning up Viewer...");
       if (
         socketRef.current &&
         socketRef.current.readyState === WebSocket.OPEN
@@ -327,8 +264,31 @@ const Viewer = () => {
       });
       qaPeersRef.current = {};
       signalQueueRef.current = [];
+      if (videoRef.current && videoRef.current.srcObject) {
+        videoRef.current.srcObject.getTracks().forEach((track) => track.stop());
+        videoRef.current.srcObject = null;
+      }
     };
   }, [streamId]);
+  console.log(connectedPeers, "connectedPeers");
+  // Reassign host stream on re-render
+  useEffect(() => {
+    if (videoRef.current && !videoRef.current.srcObject && peerRef.current) {
+      peerRef.current.on("stream", (stream) => {
+        videoRef.current.srcObject = stream;
+        videoRef.current
+          .play()
+          .then(() => {
+            setStreamActive(true);
+            setAutoplayFailed(false);
+          })
+          .catch((err) => {
+            console.error("Video play error:", err);
+            setAutoplayFailed(true);
+          });
+      });
+    }
+  }, [qaPeers, qaStatus]);
 
   const requestQA = () => {
     const socket = socketRef.current;
@@ -339,10 +299,8 @@ const Viewer = () => {
           payload: { to: streamId, from: viewerId },
         })
       );
-      console.log("Viewer sent Q&A request");
       setQaStatus("requested");
     } else {
-      console.error("Cannot request Q&A: WebSocket not open");
       alert("WebSocket disconnected. Please try reconnecting.");
     }
   };
@@ -353,17 +311,10 @@ const Viewer = () => {
       socket.send(
         JSON.stringify({
           type: "chat",
-          payload: {
-            from: viewerId,
-            text,
-            sentBy: "Host",
-            to: streamId,
-          },
+          payload: { from: viewerId, text, to: streamId },
         })
       );
-      console.log("Viewer sent chat:", text);
     } else {
-      console.error("Cannot send message: WebSocket not open");
       alert("WebSocket disconnected. Please try reconnecting.");
     }
   };
@@ -382,7 +333,6 @@ const Viewer = () => {
   };
 
   const retryConnection = () => {
-    console.log("Manual WebSocket retry initiated");
     setConnectionStatus("connecting");
     if (socketRef.current) {
       socketRef.current.close();
@@ -395,30 +345,47 @@ const Viewer = () => {
       style={{
         display: "flex",
         height: "100vh",
-        background: "#1a1a1a",
-        color: "#fff",
-        fontFamily: "'Arial', sans-serif",
+        background: "rgb(26, 26, 26)",
+        fontFamily: "'Roboto', sans-serif",
       }}
     >
+      {/* Main Video Area */}
       <div
         style={{
-          flex: 2,
-          padding: "20px",
+          flex: 1,
           display: "flex",
           flexDirection: "column",
-          gap: "20px",
-          position: "relative",
+          padding: "20px",
+          gap: "10px",
         }}
       >
-        {/* Main View: Host (initially) or Q&A Grid */}
-        {Object.keys(qaPeers).length === 0 && qaStatus !== "approved" ? (
+        <div
+          style={{
+            flex: 1,
+            display: "grid",
+            gridTemplateColumns:
+              Object.keys(qaPeers).length > 0 || qaStatus === "approved"
+                ? "repeat(auto-fit, minmax(300px, 1fr))"
+                : "1fr",
+            gap: "10px",
+            maxHeight: "80vh",
+            overflowY: "auto",
+            padding: "10px",
+            background: "rgb(51, 51, 51)",
+            borderRadius: "8px",
+            boxShadow: "0 2px 10px rgba(0, 0, 0, 0.1)",
+          }}
+        >
+          {/* Host Video */}
           <div
             style={{
-              flex: 1,
-              maxHeight: "60vh",
-              borderRadius: "10px",
+              position: "relative",
+              borderRadius: "8px",
               overflow: "hidden",
-              boxShadow: "0 4px 15px rgba(0, 0, 0, 0.5)",
+              height:
+               qaStatus === "approved"
+                  ? "fit-content"
+                  : "100%",
             }}
           >
             <video
@@ -429,7 +396,10 @@ const Viewer = () => {
               muted
               style={{
                 width: "100%",
-                height: "100%",
+                height:
+                  Object.keys(qaPeers).length > 0 || qaStatus === "approved"
+                    ? "300px"
+                    : "100%",
                 objectFit: "cover",
                 background: "#000",
               }}
@@ -439,45 +409,35 @@ const Viewer = () => {
                 position: "absolute",
                 bottom: "10px",
                 left: "10px",
-                background: "rgba(0, 0, 0, 0.7)",
-                padding: "5px",
-                borderRadius: "5px",
+                background: "rgba(0, 0, 0, 0.6)",
+                color: "#fff",
+                padding: "5px 10px",
+                borderRadius: "4px",
                 fontSize: "14px",
               }}
             >
               Host
             </div>
           </div>
-        ) : (
-          <div
-            style={{
-              flex: 1,
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))",
-              gap: "10px",
-              maxHeight: "60vh",
-              overflowY: "auto",
-            }}
-          >
-            {/* Host Video */}
+          {/* Local Video (if Q&A approved) */}
+          {qaStatus === "approved" && (
             <div
               style={{
                 position: "relative",
-                borderRadius: "10px",
-                boxShadow: "0 4px 15px rgba(0, 0, 0, 0.5)",
+                borderRadius: "8px",
                 overflow: "hidden",
                 height: "fit-content",
               }}
             >
               <video
-                key="host-video"
-                ref={videoRef}
+                key="local-video"
+                ref={localVideoRef}
                 autoPlay
-                playsInline
                 muted
+                playsInline
                 style={{
                   width: "100%",
-                  height: "200px",
+                  height: "300px",
                   objectFit: "cover",
                   background: "#000",
                 }}
@@ -487,35 +447,40 @@ const Viewer = () => {
                   position: "absolute",
                   bottom: "10px",
                   left: "10px",
-                  background: "rgba(0, 0, 0, 0.7)",
-                  padding: "5px",
-                  borderRadius: "5px",
+                  background: "rgba(0, 0, 0, 0.6)",
+                  color: "#fff",
+                  padding: "5px 10px",
+                  borderRadius: "4px",
                   fontSize: "14px",
                 }}
               >
-                Host
+                You
               </div>
             </div>
-            {/* Local Video (if Q&A approved) */}
-            {qaStatus === "approved" && (
+          )}
+          {/* Q&A Peers */}
+          {Object.keys(qaPeers).map((userId) =>
+            qaPeers[userId]?.stream ? (
               <div
+                key={`qa-${userId}`}
                 style={{
                   position: "relative",
-                  borderRadius: "10px",
-                  boxShadow: "0 4px 15px rgba(0, 0, 0, 0.5)",
+                  borderRadius: "8px",
                   overflow: "hidden",
-                  height: "fit-content",
                 }}
               >
                 <video
-                  key="local-video"
-                  ref={localVideoRef}
                   autoPlay
                   muted
                   playsInline
+                  ref={(el) => {
+                    if (el && qaPeers[userId]?.stream) {
+                      el.srcObject = qaPeers[userId].stream;
+                    }
+                  }}
                   style={{
                     width: "100%",
-                    height: "200px",
+                    height: "300px",
                     objectFit: "cover",
                     background: "#000",
                   }}
@@ -525,241 +490,139 @@ const Viewer = () => {
                     position: "absolute",
                     bottom: "10px",
                     left: "10px",
-                    background: "rgba(0, 0, 0, 0.7)",
-                    padding: "5px",
-                    borderRadius: "5px",
+                    background: "rgba(0, 0, 0, 0.6)",
+                    color: "#fff",
+                    padding: "5px 10px",
+                    borderRadius: "4px",
                     fontSize: "14px",
                   }}
                 >
-                  You
+                  User {userId}
                 </div>
               </div>
-            )}
-            {/* Q&A Peers */}
-            {Object.keys(qaPeers).map(
-              (userId) =>
-                qaPeers[userId]?.stream && (
-                  <div
-                    key={`qa-${userId}`}
-                    style={{
-                      position: "relative",
-                      borderRadius: "10px",
-                      boxShadow: "0 4px 15px rgba(0, 0, 0, 0.5)",
-                      overflow: "hidden",
-                      height: "fit-content",
-                    }}
-                  >
-                    <video
-                      ref={(el) =>
-                        el && (el.srcObject = qaPeers[userId].stream)
-                      }
-                      autoPlay
-                      muted
-                      playsInline
-                      style={{
-                        width: "100%",
-                        height: "200px",
-                        objectFit: "cover",
-                        background: "#000",
-                      }}
-                    />
-                    <div
-                      style={{
-                        position: "absolute",
-                        bottom: "10px",
-                        left: "10px",
-                        background: "rgba(0, 0, 0, 0.7)",
-                        padding: "5px",
-                        borderRadius: "5px",
-                        fontSize: "14px",
-                      }}
-                    >
-                      User {userId}
-                    </div>
-                  </div>
-                )
-            )}
-          </div>
-        )}
-        {/* Peer List: IDs for non-Q&A peers */}
+            ) : null
+          )}
+        </div>
+        {/* Toolbar */}
         <div
           style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))",
+            display: "flex",
+            justifyContent: "center",
             gap: "10px",
-            maxHeight: "20vh",
-            overflowY: "auto",
-          }}
-        >
-          {connectedPeers
-            .filter(
-              (userId) =>
-                !Object.keys(qaPeers).includes(userId) && userId !== viewerId
-            )
-            .map((userId) => (
-              <div
-                key={userId}
-                style={{
-                  height: "100px",
-                  borderRadius: "10px",
-                  background: "#333",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  boxShadow: "0 4px 15px rgba(0, 0, 0, 0.5)",
-                  fontSize: "14px",
-                  textAlign: "center",
-                }}
-              >
-                User {userId}
-              </div>
-            ))}
-        </div>
-        {autoplayFailed && (
-          <button
-            onClick={playStream}
-            style={{
-              padding: "8px 15px",
-              background: "#ffaa00",
-              border: "none",
-              borderRadius: "5px",
-              color: "#fff",
-              cursor: "pointer",
-              transition: "background 0.3s",
-              boxShadow: "0 2px 10px rgba(0, 0, 0, 0.5)",
-            }}
-            onMouseOver={(e) => (e.target.style.background = "#ffbb33")}
-            onMouseOut={(e) => (e.target.style.background = "#ffaa00")}
-          >
-            Start Stream
-          </button>
-        )}
-        <div
-          style={{
-            background: "#2a2a2a",
             padding: "10px",
+            background: "rgb(51, 51, 51)",
             borderRadius: "8px",
-            textAlign: "center",
-            fontSize: "14px",
-            color:
-              connectionStatus === "connected"
-                ? "#00ff00"
-                : connectionStatus === "error" || connectionStatus === "failed"
-                ? "#ff4444"
-                : "#ffaa00",
+            boxShadow: "0 2px 10px rgba(0, 0, 0, 0.1)",
           }}
         >
-          Connection Status:{" "}
-          {connectionStatus === "connected"
-            ? "Connected"
-            : connectionStatus === "disconnected"
-            ? "Disconnected"
-            : connectionStatus === "error"
-            ? "Error"
-            : connectionStatus === "failed"
-            ? "Failed"
-            : "Connecting"}
-        </div>
-        <div
-          style={{
-            background: "#2a2a2a",
-            padding: "10px",
-            borderRadius: "8px",
-            textAlign: "center",
-            fontSize: "14px",
-            color: streamActive ? "#00ff00" : "#ff4444",
-          }}
-        >
-          Stream Status: {streamActive ? "Live" : "Offline"}
-        </div>
-        <button
-          onClick={requestQA}
-          disabled={qaStatus !== "idle" || connectionStatus !== "connected"}
-          style={{
-            padding: "8px 15px",
-            background:
-              qaStatus === "idle" && connectionStatus === "connected"
-                ? "#00ccff"
-                : qaStatus === "requested"
-                ? "#ffaa00"
-                : "#666",
-            border: "none",
-            borderRadius: "5px",
-            color: "#fff",
-            cursor:
-              qaStatus === "idle" && connectionStatus === "connected"
-                ? "pointer"
-                : "not-allowed",
-            transition: "background 0.3s",
-            boxShadow: "0 2px 10px rgba(0, 0, 0, 0.5)",
-          }}
-          onMouseOver={(e) =>
-            qaStatus === "idle" &&
-            connectionStatus === "connected" &&
-            (e.target.style.background = "#00e6ff")
-          }
-          onMouseOut={(e) =>
-            qaStatus === "idle" &&
-            connectionStatus === "connected" &&
-            (e.target.style.background = "#00ccff")
-          }
-        >
-          {qaStatus === "idle"
-            ? "Request Q&A"
-            : qaStatus === "requested"
-            ? "Waiting for Approval"
-            : "In Q&A"}
-        </button>
-        {connectionStatus === "failed" && (
+          {autoplayFailed && (
+            <button
+              onClick={playStream}
+              style={{
+                padding: "8px 16px",
+                background: "#ffaa00",
+                color: "#fff",
+                border: "none",
+                borderRadius: "4px",
+              }}
+            >
+              Start Stream
+            </button>
+          )}
           <button
-            onClick={retryConnection}
+            onClick={requestQA}
+            disabled={qaStatus !== "idle" || connectionStatus !== "connected"}
             style={{
-              padding: "8px 15px",
-              background: "#ffaa00",
-              border: "none",
-              borderRadius: "5px",
+              padding: "8px 16px",
+              background:
+                qaStatus === "idle" && connectionStatus === "connected"
+                  ? "#4caf50"
+                  : qaStatus === "requested"
+                  ? "#ffaa00"
+                  : "#666",
               color: "#fff",
-              cursor: "pointer",
-              transition: "background 0.3s",
-              boxShadow: "0 2px 10px rgba(0, 0, 0, 0.5)",
+              border: "none",
+              borderRadius: "4px",
+              cursor:
+                qaStatus === "idle" && connectionStatus === "connected"
+                  ? "pointer"
+                  : "not-allowed",
             }}
-            onMouseOver={(e) => (e.target.style.background = "#ffbb33")}
-            onMouseOut={(e) => (e.target.style.background = "#ffaa00")}
           >
-            Retry Connection
+            {qaStatus === "idle"
+              ? "Request Q&A"
+              : qaStatus === "requested"
+              ? "Waiting for Approval"
+              : "In Q&A"}
           </button>
-        )}
-        <button
-          onClick={toggleFullscreen}
-          style={{
-            position: "absolute",
-            bottom: "50px",
-            right: "30px",
-            padding: "8px 15px",
-            background: "#00ccff",
-            border: "none",
-            borderRadius: "5px",
-            color: "#fff",
-            cursor: "pointer",
-            transition: "background 0.3s",
-            boxShadow: "0 2px 10px rgba(0, 0, 0, 0.5)",
-          }}
-          onMouseOver={(e) => (e.target.style.background = "#00e6ff")}
-          onMouseOut={(e) => (e.target.style.background = "#00ccff")}
-        >
-          {isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
-        </button>
+          {connectionStatus === "failed" && (
+            <button
+              onClick={retryConnection}
+              style={{
+                padding: "8px 16px",
+                background: "#ffaa00",
+                color: "#fff",
+                border: "none",
+                borderRadius: "4px",
+              }}
+            >
+              Retry Connection
+            </button>
+          )}
+          <button
+            onClick={toggleFullscreen}
+            style={{
+              padding: "8px 16px",
+              background: "#2196f3",
+              color: "#fff",
+              border: "none",
+              borderRadius: "4px",
+            }}
+          >
+            {isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
+          </button>
+        </div>
       </div>
+      {/* Sidebar */}
       <div
         style={{
-          flex: 1,
+          width: "400px",
+          background: "rgb(51, 51, 51)",
+          borderLeft: "1px solid rgb(51, 51, 51)",
           display: "flex",
           flexDirection: "column",
-          padding: "20px",
-          gap: "20px",
+          padding: "10px",
+          gap: "10px",
+          overflowY: "auto",
         }}
       >
+        {/* Chat */}
         <ChatBox messages={chatMessages} sendMessage={sendMessage} />
+
+        {/* Participants */}
+        <div>
+          <h3 style={{ margin: "0 0 10px 0", fontSize: "16px", color: "#fff" }}>
+            Participants
+          </h3>
+          {/* // .filter(
+          //   (userId) =>
+          //     !Object.keys(qaPeers).includes(userId) && userId !== viewerId
+          // ) */}
+          {connectedPeers.map((userId) => (
+            <div
+              key={userId}
+              style={{
+                padding: "10px",
+                background: "#fff",
+                borderRadius: "4px",
+                marginBottom: "10px",
+                textAlign: "center",
+              }}
+            >
+              User {userId}
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
