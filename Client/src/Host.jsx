@@ -14,7 +14,8 @@ const Host = () => {
   const [qaRequests, setQaRequests] = useState([]);
   const [activeQaUsers, setActiveQaUsers] = useState([]);
   const { streamId: hostId } = useParams();
-  const SOCKETAPI = process.env.REACT_APP_WS_URL || "ws://localhost:8880/";
+  const SOCKETAPI =
+    "wss://videostreaming-zkt4.onrender.com" || "ws://localhost:8880/";
   const iceServers = [
     { urls: "stun:stun.l.google.com:19302" },
     {

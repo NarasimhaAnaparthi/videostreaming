@@ -45,7 +45,7 @@ const Viewer = () => {
       sendQueuedSignals();
       return;
     }
-    const wsUrl = process.env.REACT_APP_WS_URL || "ws://localhost:8880";
+    const wsUrl = "wss://videostreaming-zkt4.onrender.com" || "ws://localhost:8880";
     socketRef.current = new WebSocket(wsUrl);
     const socket = socketRef.current;
 
