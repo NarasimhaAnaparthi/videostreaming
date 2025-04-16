@@ -22,14 +22,24 @@ const Viewer = () => {
   const [autoplayFailed, setAutoplayFailed] = useState(false);
   const [connectedPeers, setConnectedPeers] = useState([]);
 
-  const iceServers = [
-    { urls: "stun:stun.l.google.com:19302" },
-    {
-      urls: "turn:openrelay.metered.ca:80",
-      username: "openrelayproject",
-      credential: "openrelayproject",
-    },
-  ];
+const iceServers = [
+  { urls: "stun:stun.l.google.com:19302" },
+  { urls: "stun:stun1.l.google.com:19302" },
+  {
+    urls: [
+      "turn:openrelay.metered.ca:80",
+      "turn:openrelay.metered.ca:443",
+      "turns:openrelay.metered.ca:443" // Secure TURN
+    ],
+    username: "openrelayproject",
+    credential: "openrelayproject",
+  },
+  {
+    urls: "turn:relay1.experiment.webrtc.org:3478",
+    username: "openrelayproject",
+    credential: "openrelayproject",
+  }
+];
 
   const sendQueuedSignals = () => {
     if (socketRef.current?.readyState !== WebSocket.OPEN) return;
