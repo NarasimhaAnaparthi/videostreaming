@@ -15,15 +15,25 @@ const Host = () => {
   const [activeQaUsers, setActiveQaUsers] = useState([]);
   const { streamId: hostId } = useParams();
   const SOCKETAPI =
-    "wss://videostreaming-zkt4.onrender.com" || "ws://localhost:8880/";
-  const iceServers = [
-    { urls: "stun:stun.l.google.com:19302" },
-    {
-      urls: "turn:openrelay.metered.ca:80",
-      username: "openrelayproject",
-      credential: "openrelayproject",
-    },
-  ];
+    "wss://videostreaming-zkt4.onrender.com" ;
+    const iceServers = [
+      { urls: "stun:stun.l.google.com:19302" },
+      { urls: "stun:stun1.l.google.com:19302" },
+      {
+        urls: [
+          "turn:openrelay.metered.ca:80",
+          "turn:openrelay.metered.ca:443",
+          "turns:openrelay.metered.ca:443" // Secure TURN
+        ],
+        username: "openrelayproject",
+        credential: "openrelayproject",
+      },
+      {
+        urls: "turn:relay1.experiment.webrtc.org:3478",
+        username: "openrelayproject",
+        credential: "tesopenrelayprojectt",
+      }
+    ];
 
   const connectWebSocket = () => {
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
