@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import Peer from "simple-peer";
 import ChatBox from "./ChatBox";
 import { v4 as uuidv4 } from "uuid";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 const viewerId = uuidv4();
 
 const Viewer = () => {
@@ -13,7 +13,11 @@ const Viewer = () => {
   const peerRef = useRef(null);
   const qaPeersRef = useRef({});
   const signalQueueRef = useRef([]);
+  const isSessionEndedRef = useRef(false);
+  const hasSessionEndedRef = useRef(false);
+  const intervalRef = useRef(null);
   const [qaPeers, setQaPeers] = useState({});
+  const [peersConnected, SetPeersConnected] = useState({});
   const [chatMessages, setChatMessages] = useState([]);
   const [streamActive, setStreamActive] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -21,25 +25,21 @@ const Viewer = () => {
   const [connectionStatus, setConnectionStatus] = useState("disconnected");
   const [autoplayFailed, setAutoplayFailed] = useState(false);
   const [connectedPeers, setConnectedPeers] = useState([]);
-
-const iceServers = [
-  { urls: "stun:stun.l.google.com:19302" },
-  { urls: "stun:stun1.l.google.com:19302" },
-  {
-    urls: [
-      "turn:openrelay.metered.ca:80",
-      "turn:openrelay.metered.ca:443",
-      "turns:openrelay.metered.ca:443" // Secure TURN
-    ],
-    username: "openrelayproject",
-    credential: "openrelayproject",
-  },
-  {
-    urls: "turn:relay1.experiment.webrtc.org:3478",
-    username: "openrelayproject",
-    credential: "openrelayproject",
-  }
-];
+  const [redirectionCount, setRedirectionCount] = useState(0);
+  const navigate = useNavigate();
+  const iceServers = [
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" },
+    {
+      urls: [
+        "turn:openrelay.metered.ca:80",
+        "turn:openrelay.metered.ca:443",
+        "turns:openrelay.metered.ca:443",
+      ],
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
+  ];
 
   const sendQueuedSignals = () => {
     if (socketRef.current?.readyState !== WebSocket.OPEN) return;
@@ -55,7 +55,9 @@ const iceServers = [
       sendQueuedSignals();
       return;
     }
-    const wsUrl = "wss://videostreaming-zkt4.onrender.com" || "ws://localhost:8880";
+    // const wsUrl = "ws://localhost:8880";
+    const wsUrl = "wss://videostreaming-zkt4.onrender.com";
+
     socketRef.current = new WebSocket(wsUrl);
     const socket = socketRef.current;
 
@@ -65,6 +67,12 @@ const iceServers = [
         JSON.stringify({
           type: "register",
           payload: { userId: viewerId, role: "viewer", streamId },
+        })
+      );
+      socket.send(
+        JSON.stringify({
+          type: "request_state",
+          payload: { streamId, userId: viewerId },
         })
       );
       sendQueuedSignals();
@@ -87,6 +95,13 @@ const iceServers = [
           setQaStatus("idle");
           alert("Request Denied");
         } else if (msg.type === "chat") {
+          if (
+            msg.payload.text === "Session Closed" &&
+            !hasSessionEndedRef.current
+          ) {
+            hasSessionEndedRef.current = true;
+            onSessionEnd();
+          }
           setChatMessages((prev) => [...prev, msg.payload]);
         } else if (msg.type === "qa_stream" && msg.payload.from !== viewerId) {
           startQaPeer(msg.payload.from);
@@ -95,6 +110,15 @@ const iceServers = [
           ]);
         } else if (msg.type === "peer_list") {
           setConnectedPeers(msg.payload.peers.filter((id) => id !== viewerId));
+        } else if (msg.type === "qa_list") {
+          const qaUserIds = msg.payload.qaUsers.filter((id) => id !== viewerId);
+          qaUserIds.forEach((qaUserId) => {
+            startQaPeer(qaUserId);
+            setConnectedPeers((prev) => [...new Set([...prev, qaUserId])]);
+          });
+        } else if (msg.type === "peersList") {
+          const { peers } = msg.payload;
+          SetPeersConnected({ ...peers });
         }
       } catch (err) {
         console.error("Viewer message parse error:", err);
@@ -109,7 +133,10 @@ const iceServers = [
 
     socket.onclose = (event) => {
       setConnectionStatus("disconnected");
-      if (reconnectAttempts < maxReconnectAttempts) {
+      if (
+        reconnectAttempts < maxReconnectAttempts &&
+        !isSessionEndedRef.current
+      ) {
         const delay = baseReconnectDelay * Math.pow(2, reconnectAttempts);
         setTimeout(connectWebSocket, delay);
         reconnectAttempts++;
@@ -120,12 +147,18 @@ const iceServers = [
   };
 
   const startQaPeer = (qaUserId) => {
-    if (qaPeersRef.current[qaUserId]) return;
+    if (qaPeersRef.current[qaUserId]) {
+      console.log(`Q&A peer connection already exists for user: ${qaUserId}`);
+      return;
+    }
     const peer = new Peer({
       initiator: true,
       trickle: true,
       config: { iceServers },
     });
+
+    let retryCount = 0;
+    const maxRetries = 3;
 
     peer.on("signal", (signal) => {
       const signalData = {
@@ -146,9 +179,16 @@ const iceServers = [
       }));
     });
 
-    peer.on("error", (err) =>
-      console.error(`Q&A peer ${qaUserId} error:`, err)
-    );
+    peer.on("error", (err) => {
+      console.error(`Q&A peer ${qaUserId} error:`, err);
+      if (retryCount < maxRetries) {
+        retryCount++;
+        peer.destroy();
+        setTimeout(() => startQaPeer(qaUserId), 2000);
+      } else {
+        console.error(`Max retries reached for Q&A peer ${qaUserId}`);
+      }
+    });
 
     peer.on("close", () => {
       delete qaPeersRef.current[qaUserId];
@@ -166,7 +206,6 @@ const iceServers = [
       [qaUserId]: { peer, stream: null },
     }));
   };
-
   const startViewerStream = async () => {
     try {
       const localStream = await navigator.mediaDevices.getUserMedia({
@@ -206,6 +245,8 @@ const iceServers = [
 
   useEffect(() => {
     const setupViewer = async () => {
+      isSessionEndedRef.current = false;
+      hasSessionEndedRef.current = false;
       const waitForWebSocket = () =>
         new Promise((resolve) => {
           if (socketRef.current?.readyState === WebSocket.OPEN) {
@@ -248,13 +289,15 @@ const iceServers = [
               setAutoplayFailed(false);
             })
             .catch((err) => {
-              console.error("Video play error:", err);
+              console.error("Host video play error:", err);
               setAutoplayFailed(true);
             });
         }
       });
 
-      peerRef.current.on("error", (err) => console.error("Peer error:", err));
+      peerRef.current.on("error", (err) =>
+        console.error("Host peer error:", err)
+      );
     };
 
     setupViewer();
@@ -278,10 +321,12 @@ const iceServers = [
         videoRef.current.srcObject.getTracks().forEach((track) => track.stop());
         videoRef.current.srcObject = null;
       }
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
     };
   }, [streamId]);
-  console.log(connectedPeers, "connectedPeers");
-  // Reassign host stream on re-render
+
   useEffect(() => {
     if (videoRef.current && !videoRef.current.srcObject && peerRef.current) {
       peerRef.current.on("stream", (stream) => {
@@ -293,7 +338,7 @@ const iceServers = [
             setAutoplayFailed(false);
           })
           .catch((err) => {
-            console.error("Video play error:", err);
+            console.error("Host video play error:", err);
             setAutoplayFailed(true);
           });
       });
@@ -321,7 +366,7 @@ const iceServers = [
       socket.send(
         JSON.stringify({
           type: "chat",
-          payload: { from: viewerId, text, to: streamId },
+          payload: { from: viewerId, text, to: streamId, sentBy: "Viewer" },
         })
       );
     } else {
@@ -350,6 +395,35 @@ const iceServers = [
     connectWebSocket();
   };
 
+  const onSessionEnd = () => {
+    if (hasSessionEndedRef.current) return;
+    hasSessionEndedRef.current = true;
+    isSessionEndedRef.current = true;
+    alert("Session Ended");
+
+    const socket = socketRef.current;
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.close();
+    }
+
+    let i = 20;
+    const counter = () => {
+      i--;
+      setRedirectionCount(i);
+      if (i === 0) {
+        clearCounterInterval();
+      }
+    };
+
+    intervalRef.current = setInterval(counter, 1000);
+
+    const clearCounterInterval = () => {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+      navigate("/");
+    };
+  };
+
   return (
     <div
       style={{
@@ -359,7 +433,6 @@ const iceServers = [
         fontFamily: "'Roboto', sans-serif",
       }}
     >
-      {/* Main Video Area */}
       <div
         style={{
           flex: 1,
@@ -386,14 +459,13 @@ const iceServers = [
             boxShadow: "0 2px 10px rgba(0, 0, 0, 0.1)",
           }}
         >
-          {/* Host Video */}
           <div
             style={{
               position: "relative",
               borderRadius: "8px",
               overflow: "hidden",
               height:
-               qaStatus === "approved"
+                qaStatus === "approved" || Object.keys(qaPeers).length > 0
                   ? "fit-content"
                   : "100%",
             }}
@@ -429,7 +501,6 @@ const iceServers = [
               Host
             </div>
           </div>
-          {/* Local Video (if Q&A approved) */}
           {qaStatus === "approved" && (
             <div
               style={{
@@ -468,52 +539,49 @@ const iceServers = [
               </div>
             </div>
           )}
-          {/* Q&A Peers */}
-          {Object.keys(qaPeers).map((userId) =>
-            qaPeers[userId]?.stream ? (
-              <div
-                key={`qa-${userId}`}
+          {Object.keys(qaPeers).map((userId) => (
+            <div
+              key={`qa-${userId}`}
+              style={{
+                position: "relative",
+                borderRadius: "8px",
+                overflow: "hidden",
+                height: "fit-content",
+              }}
+            >
+              <video
+                autoPlay
+                muted
+                playsInline
+                ref={(el) => {
+                  if (el && qaPeers[userId]?.stream) {
+                    el.srcObject = qaPeers[userId].stream;
+                  }
+                }}
                 style={{
-                  position: "relative",
-                  borderRadius: "8px",
-                  overflow: "hidden",
+                  width: "100%",
+                  height: "300px",
+                  objectFit: "cover",
+                  background: "#000",
+                }}
+              />
+              <div
+                style={{
+                  position: "absolute",
+                  bottom: "10px",
+                  left: "10px",
+                  background: "rgba(0, 0, 0, 0.6)",
+                  color: "#fff",
+                  padding: "5px 10px",
+                  borderRadius: "4px",
+                  fontSize: "14px",
                 }}
               >
-                <video
-                  autoPlay
-                  muted
-                  playsInline
-                  ref={(el) => {
-                    if (el && qaPeers[userId]?.stream) {
-                      el.srcObject = qaPeers[userId].stream;
-                    }
-                  }}
-                  style={{
-                    width: "100%",
-                    height: "300px",
-                    objectFit: "cover",
-                    background: "#000",
-                  }}
-                />
-                <div
-                  style={{
-                    position: "absolute",
-                    bottom: "10px",
-                    left: "10px",
-                    background: "rgba(0, 0, 0, 0.6)",
-                    color: "#fff",
-                    padding: "5px 10px",
-                    borderRadius: "4px",
-                    fontSize: "14px",
-                  }}
-                >
-                  User {userId}
-                </div>
+                User {userId}
               </div>
-            ) : null
-          )}
+            </div>
+          ))}
         </div>
-        {/* Toolbar */}
         <div
           style={{
             display: "flex",
@@ -569,7 +637,7 @@ const iceServers = [
             <button
               onClick={retryConnection}
               style={{
-                padding: "8px 16px",
+                padding: "8px 10px",
                 background: "#ffaa00",
                 color: "#fff",
                 border: "none",
@@ -582,7 +650,7 @@ const iceServers = [
           <button
             onClick={toggleFullscreen}
             style={{
-              padding: "8px 16px",
+              padding: "8px 10px",
               background: "#2196f3",
               color: "#fff",
               border: "none",
@@ -591,9 +659,20 @@ const iceServers = [
           >
             {isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
           </button>
+          {redirectionCount > 0 && (
+            <p
+              style={{
+                padding: "8px 10px",
+                background: "white",
+                margin: 0,
+                borderRadius: "4px",
+              }}
+            >
+              Session closes in {redirectionCount} sec
+            </p>
+          )}
         </div>
       </div>
-      {/* Sidebar */}
       <div
         style={{
           width: "400px",
@@ -606,32 +685,30 @@ const iceServers = [
           overflowY: "auto",
         }}
       >
-        {/* Chat */}
         <ChatBox messages={chatMessages} sendMessage={sendMessage} />
-
-        {/* Participants */}
         <div>
           <h3 style={{ margin: "0 0 10px 0", fontSize: "16px", color: "#fff" }}>
             Participants
           </h3>
-          {/* // .filter(
-          //   (userId) =>
-          //     !Object.keys(qaPeers).includes(userId) && userId !== viewerId
-          // ) */}
-          {connectedPeers.map((userId) => (
-            <div
-              key={userId}
-              style={{
-                padding: "10px",
-                background: "#fff",
-                borderRadius: "4px",
-                marginBottom: "10px",
-                textAlign: "center",
-              }}
-            >
-              User {userId}
-            </div>
-          ))}
+          {Object.keys(peersConnected).map((userId) => {
+            console.log(peersConnected[userId]);
+            if (viewerId !== userId)
+              return (
+                <div
+                  key={userId}
+                  style={{
+                    padding: "10px",
+                    background: "#fff",
+                    borderRadius: "4px",
+                    marginBottom: "10px",
+                    textAlign: "center",
+                  }}
+                >
+                  User {userId}{" "}
+                  {peersConnected[userId].stream ? "in (Q&A)" : ""}
+                </div>
+              );
+          })}
         </div>
       </div>
     </div>

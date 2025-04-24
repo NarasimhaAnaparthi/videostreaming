@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import Peer from "simple-peer";
 import ChatBox from "./ChatBox";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 
 const Host = () => {
   const videoRef = useRef();
@@ -13,28 +13,41 @@ const Host = () => {
   const [socketStatus, setSocketStatus] = useState("disconnected");
   const [qaRequests, setQaRequests] = useState([]);
   const [activeQaUsers, setActiveQaUsers] = useState([]);
+  // const [endSession, setEndSession] = useState(false);
   const { streamId: hostId } = useParams();
-  const SOCKETAPI =
-    "wss://videostreaming-zkt4.onrender.com" ;
-    const iceServers = [
-      { urls: "stun:stun.l.google.com:19302" },
-      { urls: "stun:stun1.l.google.com:19302" },
-      {
-        urls: [
-          "turn:openrelay.metered.ca:80",
-          "turn:openrelay.metered.ca:443",
-          "turns:openrelay.metered.ca:443" // Secure TURN
-        ],
-        username: "openrelayproject",
-        credential: "openrelayproject",
-      },
-      {
-        urls: "turn:relay1.experiment.webrtc.org:3478",
-        username: "openrelayproject",
-        credential: "tesopenrelayprojectt",
-      }
-    ];
-
+  const isSessionEndedRef = useRef(false);
+  const navigate = useNavigate();
+  const SOCKETAPI = "wss://videostreaming-zkt4.onrender.com";
+  // const SOCKETAPI = "ws://localhost:8880/";
+  const iceServers = [
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" },
+    {
+      urls: [
+        "turn:openrelay.metered.ca:80",
+        "turn:openrelay.metered.ca:443",
+        "turns:openrelay.metered.ca:443", // Secure TURN
+      ],
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
+  ];
+  useEffect(() => {
+    if (socketRef.current ) {
+      const socket = socketRef.current;
+      socket.send(
+        JSON.stringify({
+          type: "peersList",
+          payload: {
+            to: null,
+            from: hostId,
+            peers: { ...peers },
+          },
+        })
+      );
+      console.log(peers,"peers sending ")
+    }
+  }, [peers]);
   const connectWebSocket = () => {
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       setSocketStatus("connected");
@@ -128,7 +141,10 @@ const Host = () => {
 
     socket.onclose = (event) => {
       setSocketStatus("disconnected");
-      if (reconnectAttempts < maxReconnectAttempts) {
+      if (
+        reconnectAttempts < maxReconnectAttempts &&
+        !isSessionEndedRef.current
+      ) {
         const delay = baseReconnectDelay * Math.pow(2, reconnectAttempts);
         setTimeout(connectWebSocket, delay);
         reconnectAttempts++;
@@ -177,7 +193,11 @@ const Host = () => {
 
   // Reassign stream on re-render
   useEffect(() => {
-    if (videoRef.current && !videoRef.current.srcObject) {
+    if (
+      videoRef.current &&
+      !videoRef.current.srcObject &&
+      !isSessionEndedRef.current
+    ) {
       navigator.mediaDevices
         .getUserMedia({ video: true, audio: true })
         .then((stream) => {
@@ -196,7 +216,7 @@ const Host = () => {
       socket.send(
         JSON.stringify({
           type: "chat",
-          payload: { from: hostId, text, to: null },
+          payload: { from: hostId, text, to: null, sentBy: "Host" },
         })
       );
     }
@@ -244,6 +264,25 @@ const Host = () => {
       setQaRequests((prev) => prev.filter((reqId) => reqId !== id));
     }
   };
+  const endStream = () => {
+    const socket = socketRef.current;
+    socket.send(
+      JSON.stringify({
+        type: "chat",
+        payload: {
+          from: hostId,
+          text: "Session Closed",
+          to: null,
+          sentBy: "Host",
+        },
+      })
+    );
+    socket.close();
+    // setEndSession(true);
+    isSessionEndedRef.current = true;
+    if (videoRef.current) videoRef.current.srcObject = null;
+    navigate("/");
+  };
 
   return (
     <div
@@ -270,7 +309,7 @@ const Host = () => {
             display: "grid",
             gridTemplateColumns:
               activeQaUsers.length > 0
-                ? "repeat(auto-fit, minmax(300px, 2fr))"
+                ? "repeat(auto-fit, minmax(300px, 1fr))"
                 : "1fr",
             gap: "10px",
             maxHeight: "80vh",
@@ -287,8 +326,8 @@ const Host = () => {
               position: "relative",
               borderRadius: "8px",
               overflow: "hidden",
-              // height: "fit-content",
-              // width: "fit-content",
+              height: "fit-content",
+              width: activeQaUsers.length == 0 ? "" : "fit-content",
             }}
           >
             <video
@@ -379,10 +418,22 @@ const Host = () => {
               color: "#fff",
               border: "none",
               borderRadius: "4px",
-              cursor: "pointer",
             }}
           >
             {socketStatus === "connected" ? "Connected" : "Disconnected"}
+          </button>
+          <button
+            style={{
+              padding: "8px 16px",
+              background: "#f44336",
+              color: "#fff",
+              border: "none",
+              borderRadius: "4px",
+              cursor: "pointer",
+            }}
+            onClick={endStream}
+          >
+            End Session
           </button>
         </div>
       </div>
