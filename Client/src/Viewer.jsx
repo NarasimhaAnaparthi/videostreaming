@@ -99,7 +99,6 @@ const Viewer = () => {
             msg.payload.text === "Session Closed" &&
             !hasSessionEndedRef.current
           ) {
-            hasSessionEndedRef.current = true;
             onSessionEnd();
           }
           setChatMessages((prev) => [...prev, msg.payload]);
@@ -396,6 +395,7 @@ const Viewer = () => {
   };
 
   const onSessionEnd = () => {
+    console.log(hasSessionEndedRef.current)
     if (hasSessionEndedRef.current) return;
     hasSessionEndedRef.current = true;
     isSessionEndedRef.current = true;
